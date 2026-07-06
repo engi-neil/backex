@@ -66,8 +66,8 @@ def compute_motion_features(old_points, new_points, status):
     if old_points is None or new_points is None or status is None:
         return np.zeros(8, dtype=np.float32)
 
-    good_new = new_points[status == 1]
-    good_old = old_points[status == 1]
+    good_new = new_points[status == 1].reshape(-1, 2)
+    good_old = old_points[status == 1].reshape(-1, 2)
 
     if len(good_new) == 0:
         return np.zeros(8, dtype=np.float32)
@@ -260,4 +260,5 @@ def process_dataset():
     print("Form labels:", form_labels.shape)
 
 
-process_dataset()
+if __name__ == "__main__":
+    process_dataset()

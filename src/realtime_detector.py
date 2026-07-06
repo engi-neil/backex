@@ -96,7 +96,9 @@ class CameraStream:
         if self.use_picamera2:
             try:
                 frame_rgb = self.picam2.capture_array('main')
-                frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                # Picamera2's "XRGB8888" format returns arrays already ordered (B, G, R, X)
+                # in memory -- just drop the alpha channel, don't re-swap R/B.
+                frame_bgr = frame_rgb[:, :, :3]
                 return True, frame_bgr
             except Exception as e:
                 print(f"Picamera2 capture error: {e}")
@@ -135,8 +137,8 @@ class OpticalFlowExtractor:
 
         status = status.reshape(-1)
 
-        good_new = new_points[status == 1]
-        good_old = old_points[status == 1]
+        good_new = new_points[status == 1].reshape(-1, 2)
+        good_old = old_points[status == 1].reshape(-1, 2)
 
         if len(good_new) == 0:
             return (
@@ -178,6 +180,10 @@ class OpticalFlowExtractor:
                 mask=None,
                 **FEATURE_PARAMS
             )
+            # This frame is now the baseline these points were detected on --
+            # don't run LK against a stale self.old_gray from a previous frame.
+            self.old_gray = frame_gray.copy()
+            return features, good_new, good_old
 
         if self.old_points is not None and self.old_gray is not None:
 

@@ -1,0 +1,6 @@
+pytest
+opencv-python
+numpy
+scikit-learn
+joblib
+tensorflow  # or tensorflow-macos + tensorflow-metal on Apple Silicon
