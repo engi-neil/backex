@@ -15,6 +15,12 @@ src/
   train_model.py          # offline: trains the two-headed GRU (exercise + form)
   convert_to_tflite.py    # offline: exports gru_model.keras to .tflite / quantized .tflite
   realtime_detector.py    # the live app: camera -> optical flow -> GRU -> on-screen overlay
+  optical_flow_core.py    # shared Shi-Tomasi + Lucas-Kanade tracker, used by both
+                           # extract_features.py and realtime_detector.py so the training
+                           # and live pipelines cannot silently diverge
+  roi.py                   # Region-of-Interest masks that constrain keypoint search to
+                           # where the exerciser is expected to be, filtering out stray
+                           # points from background gym equipment / clutter
   metrics.py               # Percentage Error metric (thesis Eq. 3.1) as a reusable function
 back_exercise_form_detector/
   features/                # saved X.npy / label arrays from extract_features.py
@@ -104,6 +110,8 @@ The suite (`tests/`) validates each stage of the pipeline independently
 using synthetic frames, so it doesn't require a camera or GPU:
 - camera color handling + `cv2.VideoCapture` fallback
 - Lucas-Kanade tracking correctness on known synthetic motion
+- ROI isolation (`tests/test_roi.py`) and stray-point exclusion end-to-end
+- training/inference tracker equivalence (`tests/test_train_inference_consistency.py`)
 - the SEQ_LEN=60 rolling feature buffer
 - the Percentage Error formula from the thesis (Chapter 3, Eq. 3.1)
 - end-to-end inference against the actual trained `gru_model.keras`
@@ -143,6 +151,23 @@ lighting will legitimately produce few or no corners. This isn't a bug; test
 against a textured background and make sure the exerciser stands out from it
 (per the thesis's own data-gathering guidance: "ensure good lighting, and a
 clean and uncluttered background").
+
+### Stray points tracked on background equipment / other people
+Tracking is now constrained by an ROI (`src/roi.py`), layering:
+1. a static ellipse covering the region the exerciser is expected to occupy,
+   given the thesis's fixed camera placement (200cm distance, 100cm height),
+   used as a fallback and outer bound;
+2. a bounding box around whatever is currently being tracked, tightening the
+   search area once tracking is established.
+
+Both `extract_features.py` and `realtime_detector.py` get this for free by
+building on the shared `OpticalFlowTracker` in `src/optical_flow_core.py` --
+neither file calls `cv2.goodFeaturesToTrack` or `cv2.calcOpticalFlowPyrLK`
+directly anymore. If stray points reappear, check whether `STATIC_ROI_X_FRAC`
+/ `STATIC_ROI_Y_FRAC` in `roi.py` still match the actual camera framing (a
+repositioned tripod or different room can invalidate the assumption). Note
+this is an isolation layer on top of optical flow, not a replacement for
+it -- Shi-Tomasi corner detection and Lucas-Kanade tracking are unchanged.
 
 ### `ModuleNotFoundError: No module named 'picamera2'` on the Pi
 `picamera2` must come from `apt` (`sudo apt install python3-picamera2

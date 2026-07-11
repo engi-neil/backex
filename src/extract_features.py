@@ -1,7 +1,11 @@
 import os
+import sys
 import cv2
 import numpy as np
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from optical_flow_core import OpticalFlowTracker
 
 # PATH CONFIGURATION
 
@@ -46,54 +50,6 @@ lk_params = dict(
     )
 )
 
-# FEATURE COMPUTATION
-
-def compute_motion_features(old_points, new_points, status):
-    """
-    Extracts motion features from tracked optical flow points.
-
-    Feature order:
-    1. Mean x-displacement
-    2. Mean y-displacement
-    3. Mean motion magnitude
-    4. Mean motion direction
-    5. Number of tracked points
-    6. Standard deviation of x-displacement
-    7. Standard deviation of y-displacement
-    8. Standard deviation of motion magnitude
-    """
-
-    if old_points is None or new_points is None or status is None:
-        return np.zeros(8, dtype=np.float32)
-
-    good_new = new_points[status == 1].reshape(-1, 2)
-    good_old = old_points[status == 1].reshape(-1, 2)
-
-    if len(good_new) == 0:
-        return np.zeros(8, dtype=np.float32)
-
-    displacement = good_new - good_old
-
-    dx = displacement[:, 0]
-    dy = displacement[:, 1]
-
-    magnitude = np.sqrt(dx ** 2 + dy ** 2)
-    direction = np.arctan2(dy, dx)
-
-    features = np.array([
-        np.mean(dx),
-        np.mean(dy),
-        np.mean(magnitude),
-        np.mean(direction),
-        len(good_new),
-        np.std(dx),
-        np.std(dy),
-        np.std(magnitude)
-    ], dtype=np.float32)
-
-    return features
-
-
 def pad_or_trim(sequence, seq_len=SEQ_LEN):
     """
     Makes all video feature sequences the same length.
@@ -117,7 +73,9 @@ def pad_or_trim(sequence, seq_len=SEQ_LEN):
 
 def extract_features_from_video(video_path):
     """
-    Extracts Lucas-Kanade optical flow features from one video.
+    Extracts Lucas-Kanade optical flow features from one video, using the
+    same OpticalFlowTracker (ROI-constrained Shi-Tomasi + LK) as the live
+    detector, so training data and live inference stay in lockstep.
     """
 
     cap = cv2.VideoCapture(str(video_path))
@@ -126,22 +84,7 @@ def extract_features_from_video(video_path):
         print(f"Could not open video: {video_path}")
         return None
 
-    ret, old_frame = cap.read()
-
-    if not ret:
-        print(f"Could not read first frame: {video_path}")
-        cap.release()
-        return None
-
-    old_frame = cv2.resize(old_frame, (FRAME_WIDTH, FRAME_HEIGHT))
-    old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
-
-    old_points = cv2.goodFeaturesToTrack(
-        old_gray,
-        mask=None,
-        **feature_params
-    )
-
+    tracker = OpticalFlowTracker(feature_params=feature_params, lk_params=lk_params)
     sequence_features = []
 
     while True:
@@ -153,48 +96,8 @@ def extract_features_from_video(video_path):
         frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        if old_points is None or len(old_points) < 10:
-            old_points = cv2.goodFeaturesToTrack(
-                old_gray,
-                mask=None,
-                **feature_params
-            )
-
-            if old_points is None:
-                sequence_features.append(np.zeros(8, dtype=np.float32))
-                old_gray = frame_gray.copy()
-                continue
-
-        new_points, status, error = cv2.calcOpticalFlowPyrLK(
-            old_gray,
-            frame_gray,
-            old_points,
-            None,
-            **lk_params
-        )
-
-        features = compute_motion_features(old_points, new_points, status)
+        features, _, _ = tracker.process_frame(frame_gray)
         sequence_features.append(features)
-
-        if new_points is not None and status is not None:
-            good_new = new_points[status == 1]
-
-            if len(good_new) > 0:
-                old_points = good_new.reshape(-1, 1, 2)
-            else:
-                old_points = cv2.goodFeaturesToTrack(
-                    frame_gray,
-                    mask=None,
-                    **feature_params
-                )
-        else:
-            old_points = cv2.goodFeaturesToTrack(
-                frame_gray,
-                mask=None,
-                **feature_params
-            )
-
-        old_gray = frame_gray.copy()
 
     cap.release()
 

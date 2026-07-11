@@ -35,12 +35,16 @@ def make_translating_frame(width, height, cx, cy, size=40, value=255):
 
 @pytest.fixture
 def translating_square_sequence():
-    """20 frames of a square moving diagonally at a constant velocity (dx=2, dy=1 per frame)."""
+    """20 frames of a square moving diagonally at a constant velocity (dx=2, dy=1
+    per frame). Positioned to stay within the default static ROI (roi.py's
+    STATIC_ROI_X_FRAC/Y_FRAC) for the full trajectory, so these tests exercise
+    steady-state tracking rather than incidentally clipping against the ROI
+    boundary."""
     n_frames = 20
     frames = []
     for i in range(n_frames):
-        cx = 60 + i * 2
-        cy = 60 + i * 1
+        cx = 140 + i * 2
+        cy = 100 + i * 1
         frames.append(make_translating_frame(FRAME_WIDTH, FRAME_HEIGHT, cx, cy))
     return frames
 

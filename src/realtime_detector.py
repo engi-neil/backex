@@ -1,5 +1,4 @@
 import os
-from pyexpat import features
 import sys
 import time
 import cv2
@@ -8,7 +7,8 @@ import joblib
 import tensorflow as tf
 from pathlib import Path
 
-from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from optical_flow_core import OpticalFlowTracker
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_DIR = BASE_DIR / "models"
@@ -121,104 +121,15 @@ class CameraStream:
 # OPTICAL FLOW FEATURE EXTRACTOR
 # ==============================================================================
 
-class OpticalFlowExtractor:
-    """Maintains state for Shi-Tomasi and Lucas-Kanade optical flow extraction."""
+class OpticalFlowExtractor(OpticalFlowTracker):
+    """Shi-Tomasi + Lucas-Kanade point tracking, constrained to an ROI to
+    avoid tracking stray points on background clutter. Thin wrapper around
+    the shared OpticalFlowTracker (src/optical_flow_core.py) so the live
+    inference pipeline and the offline training feature extractor
+    (extract_features.py) cannot silently diverge -- see git history for the
+    bug this caused when the two were separate implementations."""
     def __init__(self):
-        self.old_gray = None
-        self.old_points = None
-
-    def _compute_motion_features(self, old_points, new_points, status):
-        """Extracts exact 8 features required by the GRU model."""
-        if old_points is None or new_points is None or status is None:
-            return (
-                np.zeros(FEATURE_DIM, dtype=np.float32),
-                None,
-                None
-)
-
-        status = status.reshape(-1)
-
-        good_new = new_points[status == 1].reshape(-1, 2)
-        good_old = old_points[status == 1].reshape(-1, 2)
-
-        if len(good_new) == 0:
-            return (
-                np.zeros(FEATURE_DIM, dtype=np.float32),
-                None,
-                None
-)
-
-        displacement = good_new - good_old
-
-        dx = displacement[:, 0]
-        dy = displacement[:, 1]
-
-        magnitude = np.sqrt(dx ** 2 + dy ** 2)
-        direction = np.arctan2(dy, dx)
-
-        features = np.array([
-            np.mean(dx),
-            np.mean(dy),
-            np.mean(magnitude),
-            np.mean(direction),
-            len(good_new),
-            np.std(dx),
-            np.std(dy),
-            np.std(magnitude)
-        ], dtype=np.float32)
-
-        return features, good_new, good_old
-
-    def process_frame(self, frame_gray):
-
-        features = np.zeros(FEATURE_DIM, dtype=np.float32)
-        good_new = None
-        good_old = None
-
-        if self.old_points is None or len(self.old_points) < 10:
-            self.old_points = cv2.goodFeaturesToTrack(
-                frame_gray,
-                mask=None,
-                **FEATURE_PARAMS
-            )
-            # This frame is now the baseline these points were detected on --
-            # don't run LK against a stale self.old_gray from a previous frame.
-            self.old_gray = frame_gray.copy()
-            return features, good_new, good_old
-
-        if self.old_points is not None and self.old_gray is not None:
-
-            new_points, status, _ = cv2.calcOpticalFlowPyrLK(
-                self.old_gray,
-                frame_gray,
-                self.old_points,
-                None,
-                **LK_PARAMS
-            )
-
-            if new_points is not None and status is not None:
-                try:
-                    features, good_new, good_old = self._compute_motion_features(
-                        self.old_points,
-                        new_points,
-                        status
-                    )
-
-                    if good_new is not None and len(good_new) > 0:
-                        self.old_points = good_new.reshape(-1, 1, 2)
-                    else:
-                        self.old_points = None
-
-                except Exception as e:
-                    print(f"Optical Flow Error: {e}")
-                    self.old_points = None
-
-            else:
-                self.old_points = None
-
-        self.old_gray = frame_gray.copy()
-
-        return features, good_new, good_old
+        super().__init__(feature_params=FEATURE_PARAMS, lk_params=LK_PARAMS)
 
 
 # ==============================================================================

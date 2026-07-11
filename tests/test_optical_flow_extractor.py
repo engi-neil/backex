@@ -118,3 +118,38 @@ class TestFeatureVectorShape:
             features, _, _ = extractor.process_frame(frame)
             assert features.shape == (FEATURE_DIM,)
             assert features.dtype == np.float32
+
+
+class TestRoiIsolation:
+    def test_background_clutter_outside_roi_is_never_tracked(self):
+        """Simulates gym equipment / background clutter sitting near the frame
+        edge (outside the default static ROI, x <= 48px at FRAME_WIDTH=320)
+        alongside a moving, textured subject nearer frame center. Only the
+        subject's points should ever be tracked -- this is the direct
+        end-to-end check that ROI isolation actually keeps stray points out."""
+        extractor = OpticalFlowExtractor()
+
+        def make_frame(cx, cy):
+            frame = np.zeros((240, 320), dtype=np.uint8)
+            # "exerciser" -- textured, moving, inside the default ROI
+            y0, y1, x0, x1 = cy - 40, cy + 40, cx - 40, cx + 40
+            patch = frame[y0:y1, x0:x1]
+            ys, xs = np.indices(patch.shape)
+            frame[y0:y1, x0:x1] = ((((xs // 8) + (ys // 8)) % 2) * 255).astype(np.uint8)
+            # "background clutter" -- static, high-contrast, at the frame
+            # edge (outside the default ROI's x_frac=(0.15, 0.85))
+            frame[0:40, 0:40] = 255
+            return frame
+
+        last_good_new = None
+        for i in range(20):
+            frame = make_frame(140 + i * 2, 100 + i * 1)
+            _, good_new, _ = extractor.process_frame(frame)
+            if good_new is not None and len(good_new) > 0:
+                last_good_new = good_new
+
+        assert last_good_new is not None, "Tracker never picked up the subject"
+        xs = last_good_new[:, 0]
+        assert np.all(xs > 48), (
+            f"Tracked points found in the excluded clutter region (x<=48): {xs}"
+        )
