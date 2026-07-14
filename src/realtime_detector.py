@@ -98,7 +98,8 @@ class CameraStream:
                 frame_rgb = self.picam2.capture_array('main')
                 # Picamera2's "XRGB8888" format returns arrays already ordered (B, G, R, X)
                 # in memory -- just drop the alpha channel, don't re-swap R/B.
-                frame_bgr = frame_rgb[:, :, :3]
+                # FIX: Add .copy() to ensure a contiguous memory allocation
+                frame_bgr = frame_rgb[:, :, :3].copy()
                 return True, frame_bgr
             except Exception as e:
                 print(f"Picamera2 capture error: {e}")

@@ -50,7 +50,7 @@ sudo apt install -y \
     python3-venv \
     python3-pip \
     rpicam-apps \
-    libatlas-base-dev
+    libopenblas-dev
 
 # --- 3. Confirm the camera is actually detected -----------------------------
 
